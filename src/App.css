@@ -1,38 +1,262 @@
 .App {
-  text-align: center;
-}
-
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+  padding: 24px;
+  background:
+    radial-gradient(ellipse at top, #1a2744 0%, transparent 55%),
+    #0f1419;
+  color: #e8eef7;
 }
 
-.App-link {
-  color: #61dafb;
+.join-panel {
+  width: min(520px, 100%);
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.join-panel h1 {
+  margin: 0 0 8px;
+  font-size: 1.75rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 0 0 24px;
+  color: #9aabbd;
+  font-size: 0.95rem;
+}
+
+.join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.join-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 550;
+  color: #c5d0dc;
+}
+
+.join-form input,
+.join-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid #2a3a4f;
+  border-radius: 8px;
+  background: #121a24;
+  color: #e8eef7;
+  font: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
+.join-form input:focus,
+.join-form textarea:focus {
+  outline: 2px solid #3d7eff;
+  outline-offset: 1px;
+  border-color: #3d7eff;
+}
+
+.join-form button,
+.leave-btn {
+  appearance: none;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 18px;
+  background: #3d7eff;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.join-form button:hover,
+.leave-btn:hover {
+  background: #2f6ae6;
+}
+
+.join-form button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.secondary-btn {
+  background: #243044 !important;
+  border: 1px solid #3a4f6a !important;
+}
+
+.secondary-btn:hover:not(:disabled) {
+  background: #2e3f58 !important;
+}
+
+.token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.identity-hint {
+  margin: 0;
+  color: #9aabbd;
+  font-size: 0.85rem;
+}
+
+.identity-hint code {
+  color: #8ec7ff;
+}
+
+.error {
+  margin: 0;
+  color: #ff8b8b;
+  font-size: 0.9rem;
+}
+
+.media-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.checkbox-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+}
+
+.checkbox-label input {
+  width: auto;
+  margin: 0;
+}
+
+.media-warning {
+  margin: 0;
+  padding: 12px 20px;
+  color: #f0c674;
+  background: #2a2416;
+  border-bottom: 1px solid #4a3f20;
+  font-size: 0.9rem;
+}
+
+.capture-summary {
+  padding: 12px 14px;
+  border: 1px solid #2a3a4f;
+  border-radius: 8px;
+  background: #121a24;
+  font-size: 0.82rem;
+  color: #9aabbd;
+}
+
+.capture-summary-title {
+  margin: 0 0 8px;
+  color: #c5d0dc;
+  font-weight: 600;
+}
+
+.capture-summary ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.capture-summary li {
+  margin: 4px 0;
+}
+
+.capture-summary code {
+  color: #8ec7ff;
+  font-size: 0.8rem;
+}
+
+.capture-summary .settings-hint {
+  margin: 10px 0 0;
+}
+
+.capture-details {
+  padding: 8px 20px 12px;
+  border-bottom: 1px solid #243044;
+  color: #9aabbd;
+  font-size: 0.85rem;
+}
+
+.capture-details pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #121a24;
+  color: #8ec7ff;
+  overflow: auto;
+  font-size: 0.78rem;
+}
+
+.settings-toggle-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #243044;
+  background: #152033;
+}
+
+.settings-toggle-bar .checkbox-label {
+  color: #e8eef7;
+  font-size: 0.95rem;
+}
+
+.settings-hint {
+  color: #9aabbd;
+  font-size: 0.8rem;
+}
+
+.livekit-room,
+.room {
+  min-height: 100vh;
+  background: #0f1419;
+  color: #e8eef7;
+}
+
+.room-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #243044;
+}
+
+.room-header h1 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.status {
+  margin: 4px 0 0;
+  color: #9aabbd;
+  font-size: 0.85rem;
+}
+
+.connecting {
+  padding: 16px 20px;
+  color: #9aabbd;
+}
+
+.room-stage {
+  position: relative;
+}
+
+.leave-btn {
+  flex-shrink: 0;
+  background: #c44b4b;
+}
+
+.leave-btn:hover {
+  background: #a93c3c;
 }
