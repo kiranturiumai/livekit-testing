@@ -10,8 +10,46 @@
   color: #e8eef7;
 }
 
+.app-shell {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mode-nav {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid #2a3a4f;
+  border-radius: 10px;
+  background: #121a24;
+}
+
+.mode-btn {
+  appearance: none;
+  flex: 1;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  color: #9aabbd;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode-btn:hover {
+  color: #e8eef7;
+}
+
+.mode-btn.active {
+  background: #3d7eff;
+  color: #fff;
+}
+
 .join-panel {
-  width: min(520px, 100%);
+  width: 100%;
 }
 
 .join-panel h1 {
@@ -43,7 +81,8 @@
 }
 
 .join-form input,
-.join-form textarea {
+.join-form textarea,
+.join-form select {
   width: 100%;
   box-sizing: border-box;
   padding: 12px 14px;
@@ -57,7 +96,8 @@
 }
 
 .join-form input:focus,
-.join-form textarea:focus {
+.join-form textarea:focus,
+.join-form select:focus {
   outline: 2px solid #3d7eff;
   outline-offset: 1px;
   border-color: #3d7eff;
@@ -259,4 +299,65 @@
 
 .leave-btn:hover {
   background: #a93c3c;
+}
+
+.model-lab h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #243044;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: #3d7eff;
+  transition: width 120ms linear;
+}
+
+.status-line {
+  margin: 0;
+  color: #c5d0dc;
+  font-size: 0.9rem;
+}
+
+.audio-compare {
+  display: grid;
+  gap: 16px;
+}
+
+.audio-compare audio {
+  width: 100%;
+}
+
+.download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  padding: 12px 18px;
+  border-radius: 8px;
+  background: #243044;
+  border: 1px solid #3a4f6a;
+  color: #fff;
+  font-weight: 600;
+}
+
+.download-link:hover {
+  background: #2e3f58;
+}
+
+.join-form input[type='range'] {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.join-form input[type='file'] {
+  padding: 8px;
 }

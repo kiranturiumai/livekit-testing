@@ -1,21 +1,38 @@
 # livekit-testing
 
-Local LiveKit harness for comparing WebRTC audio capture settings (AEC / noise suppression / AGC / voiceIsolation).
+Local harness for:
+- LiveKit room join + WebRTC capture A/B (AEC / NS / AGC / voiceIsolation)
+- Offline **DeepFilterNet3** noise suppression via **ONNX Runtime Web**
 
 ## Run locally
 
 ```bash
 npm install
 cp .env.example .env
+npm run fetch:dfn-model   # downloads denoiser_model.onnx + ORT WASM into public/
 npm start
 ```
 
+`prestart` / `prebuild` also run `fetch:dfn-model` automatically.
+
 Defaults assume a LiveKit server at `ws://127.0.0.1:7880` with API key/secret `devkey` / `secret`.
+
+### Model lab
+
+Open **Model lab** in the UI, then **Process with DeepFilterNet** on `/krisp-original.mp3` (or pick your own file). Compare original vs enhanced and download the WAV.
+
+### LiveKit + DeepFilterNet
+
+On **LiveKit call**, enable **DeepFilterNet3 (ORT) on published mic** (default on). After joining, the model attaches as a LiveKit audio track processor so remotes hear denoised audio. Toggle it live in the room header; frame latency / underruns are shown next to the status.
+
+Model asset: fused DeepFilterNet3 ONNX from [kimtos-labs/denoiser-dfn3](https://huggingface.co/kimtos-labs/denoiser-dfn3) (`public/models/deepfilternet3/denoiser_model.onnx`, gitignored — large).
 
 ## Deploy (Vercel / Netlify)
 
 Build command: `npm run build`  
 Publish directory: `build`
+
+Ensure the build can download the model (network access during `prebuild`), or commit/vendor the ONNX + `public/ort` assets.
 
 Set these environment variables in the host dashboard:
 

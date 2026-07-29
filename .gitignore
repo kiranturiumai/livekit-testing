@@ -22,3 +22,8 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Large model / ORT runtime assets (fetch via npm run fetch:dfn-model)
+/public/models/**/*.onnx
+/public/ort/
+/public/deepfilternet-enhanced-smoke.wav

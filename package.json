@@ -10,6 +10,7 @@
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^13.5.0",
     "livekit-client": "^2.21.0",
+    "onnxruntime-web": "^1.22.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-scripts": "5.0.1",
@@ -20,7 +21,10 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "token": "node scripts/create-token.mjs"
+    "token": "node scripts/create-token.mjs",
+    "fetch:dfn-model": "node scripts/fetch-dfn-model.mjs",
+    "prestart": "node scripts/fetch-dfn-model.mjs",
+    "prebuild": "node scripts/fetch-dfn-model.mjs"
   },
   "eslintConfig": {
     "extends": [

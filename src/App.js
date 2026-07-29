@@ -8,6 +8,7 @@ import {
   buildAudioCaptureOptions,
 } from './audioCapture';
 import { createJoinToken } from './createToken';
+import { ModelLab } from './components/ModelLab';
 import { RoomView } from './components/RoomView';
 import './App.css';
 
@@ -30,6 +31,7 @@ function isMediaCaptureError(err) {
 }
 
 function App() {
+  const [appMode, setAppMode] = useState('livekit');
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [roomName, setRoomName] = useState(DEFAULT_ROOM_NAME);
   const [token, setToken] = useState('');
@@ -39,6 +41,7 @@ function App() {
   // Off by default: same-machine / multi-tab joins often cannot open one camera twice.
   const [enableVideo, setEnableVideo] = useState(false);
   const [recommendedAudioOnJoin, setRecommendedAudioOnJoin] = useState(true);
+  const [deepFilterNetOnJoin, setDeepFilterNetOnJoin] = useState(true);
   const [joined, setJoined] = useState(false);
   const [session, setSession] = useState(null);
   const [error, setError] = useState('');
@@ -82,6 +85,7 @@ function App() {
       audio: enableAudio,
       video: enableVideo,
       recommendedAudio: recommendedAudioOnJoin,
+      deepFilterNet: deepFilterNetOnJoin,
       options: {
         audioCaptureDefaults: buildAudioCaptureOptions({
           recommended: recommendedAudioOnJoin,
@@ -137,6 +141,7 @@ function App() {
           onLeave={handleLeave}
           mediaWarning={mediaWarning}
           initialRecommendedAudio={session.recommendedAudio}
+          initialDeepFilterNet={session.deepFilterNet}
         />
       </LiveKitRoom>
     );
@@ -144,133 +149,168 @@ function App() {
 
   return (
     <div className="App">
-      <main className="join-panel">
-        <h1>LiveKit noise cancellation test</h1>
-        <p className="subtitle">
-          Generate a token with a random identity, or paste your own. Each
-          participant needs a unique token.
-        </p>
+      <div className="app-shell">
+        <nav className="mode-nav" aria-label="App mode">
+          <button
+            type="button"
+            className={appMode === 'livekit' ? 'mode-btn active' : 'mode-btn'}
+            onClick={() => setAppMode('livekit')}
+          >
+            LiveKit call
+          </button>
+          <button
+            type="button"
+            className={appMode === 'model-lab' ? 'mode-btn active' : 'mode-btn'}
+            onClick={() => setAppMode('model-lab')}
+          >
+            Model lab
+          </button>
+        </nav>
 
-        <form className="join-form" onSubmit={handleJoin}>
-          <label htmlFor="serverUrl">
-            Server URL
-            <input
-              id="serverUrl"
-              name="serverUrl"
-              type="text"
-              value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="ws://127.0.0.1:7880"
-              autoComplete="off"
-            />
-          </label>
-
-          <label htmlFor="roomName">
-            Room name
-            <input
-              id="roomName"
-              name="roomName"
-              type="text"
-              value={roomName}
-              onChange={(e) => setRoomName(e.target.value)}
-              placeholder="noise-test"
-              autoComplete="off"
-            />
-          </label>
-
-          <label htmlFor="token">
-            Token
-            <textarea
-              id="token"
-              name="token"
-              rows={6}
-              value={token}
-              onChange={(e) => {
-                setToken(e.target.value);
-                setGeneratedIdentity('');
-              }}
-              placeholder="Paste LiveKit access token or generate one"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </label>
-
-          <div className="token-actions">
-            <button
-              type="button"
-              className="secondary-btn"
-              onClick={handleGenerateToken}
-              disabled={generatingToken || !roomName.trim()}
-            >
-              {generatingToken ? 'Generating…' : 'Generate token'}
-            </button>
-            {generatedIdentity ? (
-              <p className="identity-hint">
-                Identity: <code>{generatedIdentity}</code>
-              </p>
-            ) : null}
-          </div>
-
-          <div className="media-toggles">
-            <label className="checkbox-label" htmlFor="enableAudio">
-              <input
-                id="enableAudio"
-                type="checkbox"
-                checked={enableAudio}
-                onChange={(e) => setEnableAudio(e.target.checked)}
-              />
-              Publish mic on join
-            </label>
-            <label className="checkbox-label" htmlFor="enableVideo">
-              <input
-                id="enableVideo"
-                type="checkbox"
-                checked={enableVideo}
-                onChange={(e) => setEnableVideo(e.target.checked)}
-              />
-              Publish camera on join
-            </label>
-            <label className="checkbox-label" htmlFor="recommendedAudio">
-              <input
-                id="recommendedAudio"
-                type="checkbox"
-                checked={recommendedAudioOnJoin}
-                onChange={(e) => setRecommendedAudioOnJoin(e.target.checked)}
-              />
-              Recommended WebRTC audio on join
-            </label>
-          </div>
-
-          <div className="capture-summary">
-            <p className="capture-summary-title">
-              {recommendedAudioOnJoin
-                ? 'Recommended capture (on)'
-                : 'Raw capture (off)'}
+        {appMode === 'model-lab' ? (
+          <ModelLab />
+        ) : (
+          <main className="join-panel">
+            <h1>LiveKit noise cancellation test</h1>
+            <p className="subtitle">
+              Generate a token with a random identity, or paste your own. Each
+              participant needs a unique token.
             </p>
-            <ul>
-              {Object.entries(
-                recommendedAudioOnJoin
-                  ? VOICE_AUDIO_CAPTURE
-                  : RAW_AUDIO_CAPTURE,
-              ).map(([key, value]) => (
-                <li key={key}>
-                  {key}: <code>{JSON.stringify(value)}</code>
-                </li>
-              ))}
-              <li>
-                publish: <code>AudioPresets.speech</code> + <code>dtx</code>
-              </li>
-            </ul>
-            <p className="settings-hint">
-              After joining, use the in-room toggle to A/B without leaving.
-            </p>
-          </div>
 
-          {error ? <p className="error">{error}</p> : null}
+            <form className="join-form" onSubmit={handleJoin}>
+              <label htmlFor="serverUrl">
+                Server URL
+                <input
+                  id="serverUrl"
+                  name="serverUrl"
+                  type="text"
+                  value={serverUrl}
+                  onChange={(e) => setServerUrl(e.target.value)}
+                  placeholder="ws://127.0.0.1:7880"
+                  autoComplete="off"
+                />
+              </label>
 
-          <button type="submit">Join room</button>
-        </form>
-      </main>
+              <label htmlFor="roomName">
+                Room name
+                <input
+                  id="roomName"
+                  name="roomName"
+                  type="text"
+                  value={roomName}
+                  onChange={(e) => setRoomName(e.target.value)}
+                  placeholder="noise-test"
+                  autoComplete="off"
+                />
+              </label>
+
+              <label htmlFor="token">
+                Token
+                <textarea
+                  id="token"
+                  name="token"
+                  rows={6}
+                  value={token}
+                  onChange={(e) => {
+                    setToken(e.target.value);
+                    setGeneratedIdentity('');
+                  }}
+                  placeholder="Paste LiveKit access token or generate one"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+
+              <div className="token-actions">
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={handleGenerateToken}
+                  disabled={generatingToken || !roomName.trim()}
+                >
+                  {generatingToken ? 'Generating…' : 'Generate token'}
+                </button>
+                {generatedIdentity ? (
+                  <p className="identity-hint">
+                    Identity: <code>{generatedIdentity}</code>
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="media-toggles">
+                <label className="checkbox-label" htmlFor="enableAudio">
+                  <input
+                    id="enableAudio"
+                    type="checkbox"
+                    checked={enableAudio}
+                    onChange={(e) => setEnableAudio(e.target.checked)}
+                  />
+                  Publish mic on join
+                </label>
+                <label className="checkbox-label" htmlFor="enableVideo">
+                  <input
+                    id="enableVideo"
+                    type="checkbox"
+                    checked={enableVideo}
+                    onChange={(e) => setEnableVideo(e.target.checked)}
+                  />
+                  Publish camera on join
+                </label>
+                <label className="checkbox-label" htmlFor="recommendedAudio">
+                  <input
+                    id="recommendedAudio"
+                    type="checkbox"
+                    checked={recommendedAudioOnJoin}
+                    onChange={(e) =>
+                      setRecommendedAudioOnJoin(e.target.checked)
+                    }
+                  />
+                  Recommended WebRTC audio on join
+                </label>
+                <label className="checkbox-label" htmlFor="deepFilterNetOnJoin">
+                  <input
+                    id="deepFilterNetOnJoin"
+                    type="checkbox"
+                    checked={deepFilterNetOnJoin}
+                    onChange={(e) => setDeepFilterNetOnJoin(e.target.checked)}
+                  />
+                  DeepFilterNet3 (ORT) on published mic
+                </label>
+              </div>
+
+              {/* <div className="capture-summary">
+                <p className="capture-summary-title">
+                  {recommendedAudioOnJoin
+                    ? 'Recommended capture (on)'
+                    : 'Raw capture (off)'}
+                </p>
+                <ul>
+                  {Object.entries(
+                    recommendedAudioOnJoin
+                      ? VOICE_AUDIO_CAPTURE
+                      : RAW_AUDIO_CAPTURE,
+                  ).map(([key, value]) => (
+                    <li key={key}>
+                      {key}: <code>{JSON.stringify(value)}</code>
+                    </li>
+                  ))}
+                  <li>
+                    publish: <code>AudioPresets.speech</code> + <code>dtx</code>
+                  </li>
+                </ul>
+                <p className="settings-hint">
+                  After joining, toggle WebRTC capture and DeepFilterNet live
+                  without leaving the room.
+                </p>
+              </div> */}
+
+              {error ? <p className="error">{error}</p> : null}
+
+              <button type="submit">Join room</button>
+            </form>
+          </main>
+        )}
+      </div>
     </div>
   );
 }

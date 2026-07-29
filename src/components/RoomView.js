@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ControlBar,
   GridLayout,
@@ -10,13 +10,16 @@ import {
   useRoomContext,
   useTracks,
 } from '@livekit/components-react';
-import { ConnectionState, Track } from 'livekit-client';
+import { ConnectionState, RoomEvent, Track } from 'livekit-client';
 import { buildAudioCaptureOptions } from '../audioCapture';
+import { DeepFilterNetLiveKitProcessor } from '../livekit/deepFilterNetProcessor';
+import { getDeepFilterSession } from '../models/deepfilternetOrt';
 
 export function RoomView({
   onLeave,
   mediaWarning,
   initialRecommendedAudio = true,
+  initialDeepFilterNet = true,
 }) {
   const room = useRoomContext();
   const connectionState = useConnectionState();
@@ -25,8 +28,15 @@ export function RoomView({
   const [recommendedAudio, setRecommendedAudio] = useState(
     initialRecommendedAudio,
   );
+  const [deepFilterNet, setDeepFilterNet] = useState(initialDeepFilterNet);
   const [busy, setBusy] = useState(false);
+  const [dfnBusy, setDfnBusy] = useState(false);
   const [toggleError, setToggleError] = useState('');
+  const [dfnStatus, setDfnStatus] = useState(
+    initialDeepFilterNet ? 'DeepFilterNet: starting…' : 'DeepFilterNet: off',
+  );
+  const [dfnStats, setDfnStats] = useState(null);
+  const processorRef = useRef(null);
 
   const audioCaptureDefaults = buildAudioCaptureOptions({
     recommended: recommendedAudio,
@@ -40,6 +50,113 @@ export function RoomView({
     { onlySubscribed: false },
   );
 
+  const getMicTrack = useCallback(() => {
+    const pub = localParticipant.getTrackPublication(Track.Source.Microphone);
+    return pub?.track;
+  }, [localParticipant]);
+
+  const detachDeepFilterNet = useCallback(async () => {
+    const micTrack = getMicTrack();
+    processorRef.current = null;
+    if (micTrack && typeof micTrack.stopProcessor === 'function') {
+      await micTrack.stopProcessor();
+    }
+  }, [getMicTrack]);
+
+  const attachDeepFilterNet = useCallback(async () => {
+    const micTrack = getMicTrack();
+    if (!micTrack) {
+      setDfnStatus('DeepFilterNet: waiting for microphone…');
+      return;
+    }
+
+    setDfnStatus('DeepFilterNet: loading model…');
+    await getDeepFilterSession();
+
+    const processor = new DeepFilterNetLiveKitProcessor({
+      enabled: true,
+      attenLimDb: 0,
+    });
+    processorRef.current = processor;
+    await micTrack.setProcessor(processor);
+    setDfnStatus('DeepFilterNet: on (ORT)');
+  }, [getMicTrack]);
+
+  const syncDeepFilterNet = useCallback(
+    async (enabled) => {
+      setDfnBusy(true);
+      setToggleError('');
+      try {
+        if (enabled) {
+          await attachDeepFilterNet();
+        } else {
+          await detachDeepFilterNet();
+          setDfnStatus('DeepFilterNet: off');
+          setDfnStats(null);
+        }
+        setDeepFilterNet(enabled);
+      } catch (err) {
+        console.error('[RoomView] DeepFilterNet toggle failed:', err);
+        setToggleError(
+          err?.message || 'Failed to toggle DeepFilterNet processor.',
+        );
+        setDfnStatus('DeepFilterNet: error');
+      } finally {
+        setDfnBusy(false);
+      }
+    },
+    [attachDeepFilterNet, detachDeepFilterNet],
+  );
+
+  // Attach once connected / when mic becomes available.
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connected) return undefined;
+    if (!deepFilterNet) return undefined;
+
+    let cancelled = false;
+    const tryAttach = async () => {
+      if (cancelled) return;
+      if (processorRef.current) return;
+      try {
+        await attachDeepFilterNet();
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[RoomView] DeepFilterNet attach failed:', err);
+          setToggleError(err?.message || 'Failed to attach DeepFilterNet.');
+          setDfnStatus('DeepFilterNet: error');
+        }
+      }
+    };
+
+    void tryAttach();
+    const onLocalTrackPublished = () => {
+      void tryAttach();
+    };
+    room.on(RoomEvent.LocalTrackPublished, onLocalTrackPublished);
+
+    return () => {
+      cancelled = true;
+      room.off(RoomEvent.LocalTrackPublished, onLocalTrackPublished);
+    };
+  }, [attachDeepFilterNet, connectionState, deepFilterNet, room]);
+
+  // Cleanup processor on leave/unmount.
+  useEffect(() => {
+    return () => {
+      void detachDeepFilterNet();
+    };
+  }, [detachDeepFilterNet]);
+
+  // Poll lightweight inference stats while enabled.
+  useEffect(() => {
+    if (!deepFilterNet) return undefined;
+    const id = window.setInterval(() => {
+      const stats = processorRef.current?.getStats?.();
+      if (stats) setDfnStats(stats);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [deepFilterNet]);
+
   const applyCaptureSettings = useCallback(
     async (recommended) => {
       const nextOptions = buildAudioCaptureOptions({ recommended });
@@ -48,19 +165,31 @@ export function RoomView({
         ...nextOptions,
       };
 
-      const micPub = localParticipant.getTrackPublication(
-        Track.Source.Microphone,
-      );
-      const micTrack = micPub?.track;
+      const micTrack = getMicTrack();
+      const wasDfn = deepFilterNet;
+
+      if (wasDfn) {
+        await detachDeepFilterNet();
+      }
 
       if (micTrack && typeof micTrack.restartTrack === 'function') {
         await micTrack.restartTrack(nextOptions);
-        return;
+      } else {
+        await localParticipant.setMicrophoneEnabled(true, nextOptions);
       }
 
-      await localParticipant.setMicrophoneEnabled(true, nextOptions);
+      if (wasDfn) {
+        await attachDeepFilterNet();
+      }
     },
-    [localParticipant, room],
+    [
+      attachDeepFilterNet,
+      deepFilterNet,
+      detachDeepFilterNet,
+      getMicTrack,
+      localParticipant,
+      room,
+    ],
   );
 
   const handleToggleRecommended = async (event) => {
@@ -80,6 +209,10 @@ export function RoomView({
     }
   };
 
+  const handleToggleDeepFilterNet = async (event) => {
+    await syncDeepFilterNet(event.target.checked);
+  };
+
   return (
     <div className="room">
       <header className="room-header">
@@ -90,8 +223,10 @@ export function RoomView({
             {' · '}
             Remotes: <strong>{remoteParticipants.length}</strong>
             {' · '}
-            Settings:{' '}
-            <strong>{recommendedAudio ? 'recommended' : 'raw (off)'}</strong>
+            WebRTC:{' '}
+            <strong>{recommendedAudio ? 'recommended' : 'raw'}</strong>
+            {' · '}
+            DFN: <strong>{deepFilterNet ? 'on' : 'off'}</strong>
           </p>
         </div>
         <button type="button" className="leave-btn" onClick={onLeave}>
@@ -115,7 +250,29 @@ export function RoomView({
         </span>
       </div>
 
-      {busy ? <p className="connecting">Restarting microphone…</p> : null}
+      <div className="settings-toggle-bar">
+        <label className="checkbox-label" htmlFor="deepFilterNetLive">
+          <input
+            id="deepFilterNetLive"
+            type="checkbox"
+            checked={deepFilterNet}
+            disabled={dfnBusy || connectionState !== ConnectionState.Connected}
+            onChange={handleToggleDeepFilterNet}
+          />
+          DeepFilterNet3 (ONNX Runtime Web) on published mic
+        </label>
+        <span className="settings-hint">{dfnStatus}</span>
+        {dfnStats ? (
+          <span className="settings-hint">
+            frame {dfnStats.lastFrameMs.toFixed(1)} ms · underruns{' '}
+            {dfnStats.underruns}
+          </span>
+        ) : null}
+      </div>
+
+      {busy || dfnBusy ? (
+        <p className="connecting">Updating audio pipeline…</p>
+      ) : null}
       {toggleError ? <p className="media-warning">{toggleError}</p> : null}
 
       {connectionState === ConnectionState.Connecting && (
@@ -130,7 +287,7 @@ export function RoomView({
       </details>
 
       <div className="room-stage" data-lk-theme="default">
-        <GridLayout tracks={tracks} style={{ height: 'calc(100vh - 260px)' }}>
+        <GridLayout tracks={tracks} style={{ height: 'calc(100vh - 300px)' }}>
           <ParticipantTile />
         </GridLayout>
         <RoomAudioRenderer />
