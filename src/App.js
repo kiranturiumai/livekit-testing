@@ -8,6 +8,10 @@ import {
 import { createJoinToken } from './createToken';
 import { ModelLab } from './components/ModelLab';
 import { RoomView } from './components/RoomView';
+import {
+  NS_STRATEGIES,
+  NS_STRATEGY_OPTIONS,
+} from './livekit/selectNoiseModel';
 import './App.css';
 
 const DEFAULT_SERVER_URL =
@@ -40,6 +44,9 @@ function App() {
   const [enableVideo, setEnableVideo] = useState(false);
   const [recommendedAudioOnJoin, setRecommendedAudioOnJoin] = useState(true);
   const [noiseSuppressionOnJoin, setNoiseSuppressionOnJoin] = useState(true);
+  const [noiseStrategy, setNoiseStrategy] = useState(
+    NS_STRATEGIES.DFN_WITH_FALLBACK,
+  );
   const [joined, setJoined] = useState(false);
   const [session, setSession] = useState(null);
   const [error, setError] = useState('');
@@ -84,6 +91,7 @@ function App() {
       video: enableVideo,
       recommendedAudio: recommendedAudioOnJoin,
       noiseSuppression: noiseSuppressionOnJoin,
+      noiseStrategy,
       options: {
         audioCaptureDefaults: buildAudioCaptureOptions({
           recommended: recommendedAudioOnJoin,
@@ -140,6 +148,7 @@ function App() {
           mediaWarning={mediaWarning}
           initialRecommendedAudio={session.recommendedAudio}
           initialNoiseSuppression={session.noiseSuppression}
+          noiseStrategy={session.noiseStrategy}
         />
       </LiveKitRoom>
     );
@@ -272,35 +281,26 @@ function App() {
                     checked={noiseSuppressionOnJoin}
                     onChange={(e) => setNoiseSuppressionOnJoin(e.target.checked)}
                   />
-                  AI noise suppression on join (auto: DeepFilterNet / RNNoise)
+                  Enable AI noise suppression on join
                 </label>
               </div>
 
-              {/* <div className="capture-summary">
-                <p className="capture-summary-title">
-                  {recommendedAudioOnJoin
-                    ? 'Recommended capture (on)'
-                    : 'Raw capture (off)'}
-                </p>
-                <ul>
-                  {Object.entries(
-                    recommendedAudioOnJoin
-                      ? VOICE_AUDIO_CAPTURE
-                      : RAW_AUDIO_CAPTURE,
-                  ).map(([key, value]) => (
-                    <li key={key}>
-                      {key}: <code>{JSON.stringify(value)}</code>
-                    </li>
-                  ))}
-                  <li>
-                    publish: <code>AudioPresets.speech</code> + <code>dtx</code>
-                  </li>
-                </ul>
-                <p className="settings-hint">
-                  After joining, toggle WebRTC capture and DeepFilterNet live
-                  without leaving the room.
-                </p>
-              </div> */}
+              {noiseSuppressionOnJoin ? (
+                <label htmlFor="noiseStrategy">
+                  Noise model
+                  <select
+                    id="noiseStrategy"
+                    value={noiseStrategy}
+                    onChange={(e) => setNoiseStrategy(e.target.value)}
+                  >
+                    {NS_STRATEGY_OPTIONS.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
 
               {error ? <p className="error">{error}</p> : null}
 

@@ -13,12 +13,15 @@ import {
 import { ConnectionState, RoomEvent, Track } from 'livekit-client';
 import { buildAudioCaptureOptions } from '../audioCapture';
 import { DeepFilterNetLiveKitProcessor } from '../livekit/deepFilterNetProcessor';
+import { Nsnet2LiveKitProcessor } from '../livekit/nsnet2Processor';
 import { RnnoiseLiveKitProcessor } from '../livekit/rnnoiseProcessor';
 import {
   LIVE_NOISE_MODELS,
+  NS_STRATEGIES,
   selectNoiseModel,
 } from '../livekit/selectNoiseModel';
 import { getDeepFilterSession } from '../models/deepfilternetOrt';
+import { getNsnet2Session } from '../models/nsnet2Ort';
 import { getRnnoiseModule } from '../models/rnnoiseWasm';
 
 export function RoomView({
@@ -26,6 +29,7 @@ export function RoomView({
   mediaWarning,
   initialRecommendedAudio = true,
   initialNoiseSuppression = true,
+  noiseStrategy = NS_STRATEGIES.DFN_WITH_FALLBACK,
 }) {
   const room = useRoomContext();
   const connectionState = useConnectionState();
@@ -49,7 +53,10 @@ export function RoomView({
   const processorRef = useRef(null);
   const selectedModelRef = useRef(null);
 
-  const selection = useMemo(() => selectNoiseModel(), []);
+  const selection = useMemo(
+    () => selectNoiseModel({ strategy: noiseStrategy }),
+    [noiseStrategy],
+  );
 
   const audioCaptureDefaults = buildAudioCaptureOptions({
     recommended: recommendedAudio,
@@ -98,6 +105,17 @@ export function RoomView({
         return LIVE_NOISE_MODELS.DEEPFILTERNET;
       }
 
+      if (modelId === LIVE_NOISE_MODELS.NSNET2) {
+        setNsStatus('NSNet2: loading model…');
+        await getNsnet2Session();
+        const processor = new Nsnet2LiveKitProcessor({ enabled: true });
+        processorRef.current = processor;
+        await micTrack.setProcessor(processor);
+        selectedModelRef.current = LIVE_NOISE_MODELS.NSNET2;
+        setNsStatus(`NSNet2: on (~0.5s latency) — ${selection.reason}`);
+        return LIVE_NOISE_MODELS.NSNET2;
+      }
+
       setNsStatus('RNNoise: loading WASM…');
       await getRnnoiseModule();
       const processor = new RnnoiseLiveKitProcessor({ enabled: true });
@@ -116,8 +134,10 @@ export function RoomView({
     try {
       return await attachWithModel(preferred);
     } catch (err) {
-      // If DeepFilterNet fails on a "capable" device, fall back to RNNoise.
-      if (preferred === LIVE_NOISE_MODELS.DEEPFILTERNET) {
+      if (
+        preferred === LIVE_NOISE_MODELS.DEEPFILTERNET &&
+        selection.allowRnnoiseFallback
+      ) {
         console.warn(
           '[RoomView] DeepFilterNet failed, falling back to RNNoise:',
           err,
@@ -132,7 +152,12 @@ export function RoomView({
       }
       throw err;
     }
-  }, [attachWithModel, detachNoiseProcessor, selection.modelId]);
+  }, [
+    attachWithModel,
+    detachNoiseProcessor,
+    selection.allowRnnoiseFallback,
+    selection.modelId,
+  ]);
 
   const syncNoiseSuppression = useCallback(
     async (enabled) => {
@@ -200,15 +225,64 @@ export function RoomView({
     };
   }, [detachNoiseProcessor]);
 
-  // Poll lightweight inference stats while enabled.
+  // Poll stats; if strategy allows and DeepFilterNet underruns, fall back to RNNoise.
   useEffect(() => {
     if (!noiseSuppression) return undefined;
+    if (!selection.allowRnnoiseFallback) return undefined;
+    let fallingBack = false;
+    const id = window.setInterval(() => {
+      const stats = processorRef.current?.getStats?.();
+      if (stats) setNsStats(stats);
+
+      if (
+        fallingBack ||
+        selectedModelRef.current !== LIVE_NOISE_MODELS.DEEPFILTERNET ||
+        !stats
+      ) {
+        return;
+      }
+
+      if (stats.underrunRate > 0.15 && stats.underruns > 20) {
+        fallingBack = true;
+        console.warn(
+          '[RoomView] DeepFilterNet underrun rate high — falling back to RNNoise',
+          stats,
+        );
+        void (async () => {
+          setNsStatus(
+            'DeepFilterNet too slow on this device — switching to RNNoise…',
+          );
+          try {
+            await detachNoiseProcessor();
+            await attachWithModel(LIVE_NOISE_MODELS.RNNOISE);
+            setNsStatus(
+              'RNNoise: on — DeepFilterNet underruns (fallback strategy)',
+            );
+          } catch (err) {
+            console.error('[RoomView] RNNoise fallback failed:', err);
+            setNsStatus('Noise suppression: error');
+          }
+        })();
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [
+    attachWithModel,
+    detachNoiseProcessor,
+    noiseSuppression,
+    selection.allowRnnoiseFallback,
+  ]);
+
+  // Still poll stats when fallback is disabled (DFN-only / RNNoise-only).
+  useEffect(() => {
+    if (!noiseSuppression) return undefined;
+    if (selection.allowRnnoiseFallback) return undefined;
     const id = window.setInterval(() => {
       const stats = processorRef.current?.getStats?.();
       if (stats) setNsStats(stats);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [noiseSuppression]);
+  }, [noiseSuppression, selection.allowRnnoiseFallback]);
 
   const applyCaptureSettings = useCallback(
     async (recommended) => {
@@ -269,9 +343,11 @@ export function RoomView({
   const activeModelLabel =
     selectedModelRef.current === LIVE_NOISE_MODELS.DEEPFILTERNET
       ? 'DeepFilterNet3'
-      : selectedModelRef.current === LIVE_NOISE_MODELS.RNNOISE
-        ? 'RNNoise'
-        : selection.modelLabel;
+      : selectedModelRef.current === LIVE_NOISE_MODELS.NSNET2
+        ? 'NSNet2'
+        : selectedModelRef.current === LIVE_NOISE_MODELS.RNNOISE
+          ? 'RNNoise'
+          : selection.modelLabel;
 
   return (
     <div className="room">
@@ -322,7 +398,7 @@ export function RoomView({
             disabled={nsBusy || connectionState !== ConnectionState.Connected}
             onChange={handleToggleNoiseSuppression}
           />
-          AI noise suppression (auto: DeepFilterNet / RNNoise)
+          AI noise suppression
         </label>
         <span className="settings-hint">{nsStatus}</span>
         {nsStats ? (
@@ -334,27 +410,20 @@ export function RoomView({
       </div>
 
       <div className="capture-summary" style={{ margin: '0 20px 12px' }}>
-        <p className="capture-summary-title">Selected model for this device</p>
+        <p className="capture-summary-title">Noise model strategy</p>
         <ul>
           <li>
-            Preferred: <code>{selection.modelLabel}</code>
+            Strategy: <code>{selection.strategy}</code>
+          </li>
+          <li>
+            Active: <code>{selection.modelLabel}</code>
+          </li>
+          <li>
+            RNNoise fallback:{' '}
+            <code>{selection.allowRnnoiseFallback ? 'enabled' : 'disabled'}</code>
           </li>
           <li>
             Reason: <code>{selection.reason}</code>
-          </li>
-          <li>
-            Cores: <code>{selection.assessment.cores}</code>
-            {' · '}
-            Memory:{' '}
-            <code>
-              {selection.assessment.memoryGB != null
-                ? `${selection.assessment.memoryGB} GB`
-                : 'unknown'}
-            </code>
-            {' · '}
-            Mobile: <code>{String(selection.assessment.isMobile)}</code>
-            {' · '}
-            Score: <code>{selection.assessment.score}</code>
           </li>
         </ul>
       </div>

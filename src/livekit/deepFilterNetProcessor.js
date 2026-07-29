@@ -1,17 +1,32 @@
-import * as ort from 'onnxruntime-web';
 import {
   FFT_SIZE,
   HOP_SIZE,
-  STATE_SIZE,
   getDeepFilterSession,
 } from '../models/deepfilternetOrt';
 import { MODEL_SAMPLE_RATE } from '../models/types';
 
 /**
- * LiveKit audio TrackProcessor that runs DeepFilterNet3 (ONNX Runtime Web)
- * on the published microphone track.
+ * Extra output hops for jitter (~80 ms). Larger = fewer underruns, more latency.
+ */
+const OUTPUT_PRIME_HOPS = 8;
+
+const STFT_DELAY = FFT_SIZE - HOP_SIZE;
+const TOTAL_DELAY = STFT_DELAY + OUTPUT_PRIME_HOPS * HOP_SIZE;
+const MAX_INPUT_HOPS = 16;
+
+/**
+ * LiveKit TrackProcessor for DeepFilterNet3.
  *
- * ScriptProcessor feeds input/output FIFOs; an async loop runs ORT on 480-sample hops.
+ * Why continuous "kir kir" happened:
+ * - ORT WASM + ScriptProcessor both contended on the main thread
+ * - When inference lagged, every audio quantum underran → rhythmic crackle
+ * - Non-48k AudioContext also resampled every callback → more discontinuities
+ *
+ * Fix:
+ * - Dedicated 48 kHz AudioContext (no resampling when browser honors it)
+ * - ORT runs in a Web Worker (off the audio path)
+ * - Larger output prime buffer
+ * - Underruns filled with silence (not dry/hold hybrids that chirp)
  */
 export class DeepFilterNetLiveKitProcessor {
   name = 'deepfilternet-ort';
@@ -21,6 +36,9 @@ export class DeepFilterNetLiveKitProcessor {
 
   /** @type {AudioContext | undefined} */
   #audioContext;
+
+  /** @type {boolean} */
+  #ownsContext = false;
 
   /** @type {MediaStreamAudioSourceNode | undefined} */
   #source;
@@ -34,11 +52,8 @@ export class DeepFilterNetLiveKitProcessor {
   /** @type {MediaStreamAudioDestinationNode | undefined} */
   #destination;
 
-  /** @type {import('onnxruntime-web').InferenceSession | undefined} */
-  #session;
-
-  /** @type {import('onnxruntime-web').Tensor | undefined} */
-  #states;
+  /** @type {Worker | undefined} */
+  #worker;
 
   /** @type {Float32Array} */
   #inputFifo = new Float32Array(0);
@@ -52,15 +67,23 @@ export class DeepFilterNetLiveKitProcessor {
 
   #running = false;
 
-  #processing = false;
+  #workerReady = false;
+
+  #inflight = 0;
+
+  #maxInflight = 2;
+
+  #seq = 0;
 
   #lastFrameMs = 0;
 
   #underruns = 0;
 
+  #callbacks = 0;
+
   constructor({ enabled = true, attenLimDb = 0 } = {}) {
     this.#enabled = enabled;
-    this.#attenLimDb = attenLimDb;
+    this.#attenLimDb = Number.isFinite(attenLimDb) ? attenLimDb : 0;
   }
 
   setEnabled(enabled) {
@@ -73,6 +96,7 @@ export class DeepFilterNetLiveKitProcessor {
 
   setAttenLimDb(value) {
     this.#attenLimDb = Number(value) || 0;
+    this.#worker?.postMessage({ type: 'setAtten', attenLimDb: this.#attenLimDb });
   }
 
   getStats() {
@@ -82,51 +106,100 @@ export class DeepFilterNetLiveKitProcessor {
       inputQueued: this.#inputFifo.length,
       outputQueued: this.#outputFifo.length,
       enabled: this.#enabled,
+      inflight: this.#inflight,
+      underrunRate:
+        this.#callbacks > 0 ? this.#underruns / this.#callbacks : 0,
     };
   }
 
   async init(opts) {
-    const { track, audioContext } = opts;
-    if (!audioContext) {
-      throw new Error('DeepFilterNet processor requires an AudioContext');
+    const { track } = opts;
+
+    // Warm the model in the main-thread cache first (shares HTTP cache with worker).
+    await getDeepFilterSession();
+
+    // Dedicated 48 kHz graph — DeepFilterNet is native 48k; avoids per-callback resample.
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    this.#audioContext = new Ctx({ sampleRate: MODEL_SAMPLE_RATE });
+    this.#ownsContext = true;
+    if (this.#audioContext.state === 'suspended') {
+      await this.#audioContext.resume();
     }
 
-    this.#audioContext = audioContext;
-    this.#session = await getDeepFilterSession();
-    this.#states = new ort.Tensor(
-      'float32',
-      new Float32Array(STATE_SIZE),
-      [STATE_SIZE],
-    );
     this.#inputFifo = new Float32Array(0);
-    // Priming delay matches offline delay trim (fft - hop).
-    this.#outputFifo = new Float32Array(FFT_SIZE - HOP_SIZE);
+    this.#outputFifo = new Float32Array(TOTAL_DELAY);
     this.#underruns = 0;
+    this.#callbacks = 0;
+    this.#inflight = 0;
+    this.#seq = 0;
     this.#running = true;
 
-    this.#source = audioContext.createMediaStreamSource(
+    await this.#startWorker();
+
+    this.#source = this.#audioContext.createMediaStreamSource(
       new MediaStream([track]),
     );
-    this.#destination = audioContext.createMediaStreamDestination();
+    this.#destination = this.#audioContext.createMediaStreamDestination();
 
-    const bufferSize = 512;
-    this.#scriptNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
+    // 960 samples @ 48k ≈ 20 ms — one hop pair; more stable than 512 with worker RTT.
+    const bufferSize = 1024;
+    this.#scriptNode = this.#audioContext.createScriptProcessor(bufferSize, 1, 1);
     this.#scriptNode.onaudioprocess = (event) => {
       this.#onAudioProcess(event);
     };
 
-    // Zero-gain tap to audioContext.destination keeps ScriptProcessor running
-    // even before WebRTC pulls the processed track.
-    this.#silentGain = audioContext.createGain();
+    this.#silentGain = this.#audioContext.createGain();
     this.#silentGain.gain.value = 0;
 
     this.#source.connect(this.#scriptNode);
     this.#scriptNode.connect(this.#destination);
     this.#scriptNode.connect(this.#silentGain);
-    this.#silentGain.connect(audioContext.destination);
+    this.#silentGain.connect(this.#audioContext.destination);
 
     this.processedTrack = this.#destination.stream.getAudioTracks()[0];
-    void this.#drainLoop();
+  }
+
+  async #startWorker() {
+    this.#worker = new Worker(
+      new URL('./dfnInference.worker.js', import.meta.url),
+    );
+
+    const ready = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('DeepFilterNet worker init timed out'));
+      }, 60000);
+
+      this.#worker.onmessage = (event) => {
+        const msg = event.data;
+        if (msg.type === 'ready') {
+          clearTimeout(timeout);
+          this.#workerReady = true;
+          resolve();
+          return;
+        }
+        if (msg.type === 'result') {
+          this.#inflight = Math.max(0, this.#inflight - 1);
+          this.#lastFrameMs = msg.elapsedMs || 0;
+          const enhanced = new Float32Array(msg.enhanced);
+          this.#appendOutput(enhanced);
+          this.#pumpWorker();
+          return;
+        }
+        if (msg.type === 'error') {
+          this.#inflight = Math.max(0, this.#inflight - 1);
+          console.error('[DeepFilterNet worker]', msg.message);
+          this.#pumpWorker();
+        }
+      };
+
+      this.#worker.onerror = (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      };
+    });
+
+    this.#worker.postMessage({ type: 'init', attenLimDb: this.#attenLimDb });
+    await ready;
   }
 
   async restart(opts) {
@@ -136,6 +209,7 @@ export class DeepFilterNetLiveKitProcessor {
 
   async destroy() {
     this.#running = false;
+    this.#workerReady = false;
     try {
       this.#scriptNode?.disconnect();
     } catch {
@@ -157,13 +231,25 @@ export class DeepFilterNetLiveKitProcessor {
       /* ignore */
     }
 
+    if (this.#worker) {
+      this.#worker.terminate();
+      this.#worker = undefined;
+    }
+
+    if (this.#ownsContext && this.#audioContext) {
+      try {
+        await this.#audioContext.close();
+      } catch {
+        /* ignore */
+      }
+    }
+
     this.#scriptNode = undefined;
     this.#silentGain = undefined;
     this.#source = undefined;
     this.#destination = undefined;
     this.#audioContext = undefined;
-    this.#session = undefined;
-    this.#states = undefined;
+    this.#ownsContext = false;
     this.#inputFifo = new Float32Array(0);
     this.#outputFifo = new Float32Array(0);
     this.processedTrack = undefined;
@@ -173,7 +259,11 @@ export class DeepFilterNetLiveKitProcessor {
     const next = new Float32Array(this.#inputFifo.length + samples.length);
     next.set(this.#inputFifo, 0);
     next.set(samples, this.#inputFifo.length);
-    this.#inputFifo = next;
+    const maxInput = MAX_INPUT_HOPS * HOP_SIZE;
+    this.#inputFifo =
+      next.length > maxInput
+        ? next.subarray(next.length - maxInput).slice()
+        : next;
   }
 
   #appendOutput(samples) {
@@ -181,13 +271,6 @@ export class DeepFilterNetLiveKitProcessor {
     next.set(this.#outputFifo, 0);
     next.set(samples, this.#outputFifo.length);
     this.#outputFifo = next;
-  }
-
-  #takeInputFrame() {
-    if (this.#inputFifo.length < HOP_SIZE) return null;
-    const frame = this.#inputFifo.subarray(0, HOP_SIZE).slice();
-    this.#inputFifo = this.#inputFifo.subarray(HOP_SIZE).slice();
-    return frame;
   }
 
   #takeOutput(count) {
@@ -199,112 +282,51 @@ export class DeepFilterNetLiveKitProcessor {
     }
 
     this.#underruns += 1;
-    out.set(this.#outputFifo);
-    this.#outputFifo = new Float32Array(0);
+    const available = this.#outputFifo.length;
+    if (available > 0) {
+      out.set(this.#outputFifo);
+      this.#outputFifo = new Float32Array(0);
+    }
+    // Remaining stays 0 (silence). Continuous dry/enhanced mixing caused chirps.
     return out;
   }
 
-  #resampleToModelRate(input, fromRate) {
-    if (fromRate === MODEL_SAMPLE_RATE) {
-      return input.slice();
+  #pumpWorker() {
+    if (!this.#running || !this.#workerReady || !this.#enabled || !this.#worker) {
+      return;
     }
-    const ratio = MODEL_SAMPLE_RATE / fromRate;
-    const outLength = Math.max(1, Math.round(input.length * ratio));
-    const output = new Float32Array(outLength);
-    for (let i = 0; i < outLength; i += 1) {
-      const srcIndex = i / ratio;
-      const left = Math.floor(srcIndex);
-      const right = Math.min(left + 1, input.length - 1);
-      const frac = srcIndex - left;
-      output[i] = input[left] * (1 - frac) + input[right] * frac;
-    }
-    return output;
-  }
 
-  #resampleFromModelRate(input, toRate) {
-    if (toRate === MODEL_SAMPLE_RATE) {
-      return input;
+    while (
+      this.#inflight < this.#maxInflight &&
+      this.#inputFifo.length >= HOP_SIZE &&
+      this.#outputFifo.length < TOTAL_DELAY + HOP_SIZE * 4
+    ) {
+      const frame = this.#inputFifo.subarray(0, HOP_SIZE).slice();
+      this.#inputFifo = this.#inputFifo.subarray(HOP_SIZE).slice();
+      this.#seq += 1;
+      this.#inflight += 1;
+      this.#worker.postMessage(
+        { type: 'process', frame: frame.buffer, seq: this.#seq },
+        [frame.buffer],
+      );
     }
-    const ratio = toRate / MODEL_SAMPLE_RATE;
-    const outLength = Math.max(1, Math.round(input.length * ratio));
-    const output = new Float32Array(outLength);
-    for (let i = 0; i < outLength; i += 1) {
-      const srcIndex = i / ratio;
-      const left = Math.floor(srcIndex);
-      const right = Math.min(left + 1, input.length - 1);
-      const frac = srcIndex - left;
-      output[i] = input[left] * (1 - frac) + input[right] * frac;
-    }
-    return output;
   }
 
   #onAudioProcess(event) {
     const input = event.inputBuffer.getChannelData(0);
     const output = event.outputBuffer.getChannelData(0);
-    const ctxRate = this.#audioContext?.sampleRate || MODEL_SAMPLE_RATE;
+    this.#callbacks += 1;
 
     if (!this.#enabled) {
       output.set(input);
       return;
     }
 
-    const modelInput = this.#resampleToModelRate(input, ctxRate);
-    this.#appendInput(modelInput);
+    // Context is created at 48 kHz — copy directly, no resample.
+    this.#appendInput(input);
+    this.#pumpWorker();
 
-    const modelChunk = this.#takeOutput(
-      Math.max(1, Math.round(input.length * (MODEL_SAMPLE_RATE / ctxRate))),
-    );
-    const ctxChunk = this.#resampleFromModelRate(modelChunk, ctxRate);
-
-    if (ctxChunk.length >= output.length) {
-      output.set(ctxChunk.subarray(0, output.length));
-    } else {
-      output.fill(0);
-      output.set(ctxChunk);
-    }
+    const chunk = this.#takeOutput(output.length);
+    output.set(chunk);
   }
-
-  async #drainLoop() {
-    while (this.#running) {
-      if (!this.#enabled || !this.#session || this.#processing) {
-        await sleep(4);
-        continue;
-      }
-
-      const frame = this.#takeInputFrame();
-      if (!frame) {
-        await sleep(2);
-        continue;
-      }
-
-      this.#processing = true;
-      try {
-        const t0 = performance.now();
-        const atten = new ort.Tensor(
-          'float32',
-          Float32Array.from([this.#attenLimDb]),
-          [],
-        );
-        const outputs = await this.#session.run({
-          input_frame: new ort.Tensor('float32', frame, [HOP_SIZE]),
-          states: this.#states,
-          atten_lim_db: atten,
-        });
-        this.#lastFrameMs = performance.now() - t0;
-        this.#states = outputs.new_states;
-        this.#appendOutput(outputs.enhanced_audio_frame.data);
-      } catch (err) {
-        console.error('[DeepFilterNetLiveKitProcessor] inference failed:', err);
-        this.#appendOutput(frame);
-      } finally {
-        this.#processing = false;
-      }
-    }
-  }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

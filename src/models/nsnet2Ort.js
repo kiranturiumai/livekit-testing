@@ -14,7 +14,7 @@ const N_FREQ = N_FFT / 2 + 1; // 513
 
 let sessionPromise = null;
 
-function getNsnet2Session() {
+export function getNsnet2Session() {
   if (!sessionPromise) {
     ort.env.wasm.numThreads = 1;
     ort.env.wasm.simd = true;
@@ -24,6 +24,71 @@ function getNsnet2Session() {
     });
   }
   return sessionPromise;
+}
+
+export const NSNET2_N_HOP = N_HOP;
+export const NSNET2_N_WIN = N_WIN;
+export const NSNET2_N_FFT = N_FFT;
+export const NSNET2_N_FREQ = N_FREQ;
+
+/**
+ * Enhance a mono PCM chunk at 48 kHz with NSNet2.
+ * @param {Float32Array} mono
+ * @param {import('onnxruntime-web').InferenceSession} session
+ * @returns {Promise<Float32Array>}
+ */
+export async function enhanceNsnet2Chunk(mono, session) {
+  const win = sqrtHann(N_WIN);
+  const awin = synthesisWindow(win, N_HOP);
+
+  const padded = new Float32Array(mono.length + N_WIN);
+  padded.set(mono);
+  const frameCount = Math.max(1, Math.floor((padded.length - N_WIN) / N_HOP) + 1);
+
+  const specReal = new Array(frameCount);
+  const specImag = new Array(frameCount);
+  const feat = new Float32Array(frameCount * N_FREQ);
+
+  for (let f = 0; f < frameCount; f += 1) {
+    const start = f * N_HOP;
+    const windowed = new Float32Array(N_FFT);
+    for (let i = 0; i < N_WIN; i += 1) {
+      windowed[i] = padded[start + i] * win[i];
+    }
+    const { real, imag } = rfft(windowed, N_FFT);
+    specReal[f] = real;
+    specImag[f] = imag;
+    for (let k = 0; k < N_FREQ; k += 1) {
+      const power = real[k] * real[k] + imag[k] * imag[k];
+      feat[f * N_FREQ + k] = Math.log10(Math.max(power, 1e-12));
+    }
+  }
+
+  const inputTensor = new ort.Tensor('float32', feat, [1, frameCount, N_FREQ]);
+  const results = await session.run({
+    [session.inputNames[0]]: inputTensor,
+  });
+  const gain = results[session.outputNames[0]].data;
+
+  const outLen = (frameCount - 1) * N_HOP + N_WIN;
+  const output = new Float32Array(outLen);
+  for (let f = 0; f < frameCount; f += 1) {
+    const gainOffset = f * N_FREQ;
+    const maskedReal = new Float32Array(N_FREQ);
+    const maskedImag = new Float32Array(N_FREQ);
+    for (let k = 0; k < N_FREQ; k += 1) {
+      const g = gain[gainOffset + k];
+      maskedReal[k] = specReal[f][k] * g;
+      maskedImag[k] = specImag[f][k] * g;
+    }
+    const frame = irfft(maskedReal, maskedImag, N_FFT);
+    const start = f * N_HOP;
+    for (let i = 0; i < N_WIN; i += 1) {
+      output[start + i] += frame[i] * awin[i];
+    }
+  }
+
+  return output.subarray(0, mono.length).slice();
 }
 
 /** Symmetric sqrt-Hann window */
