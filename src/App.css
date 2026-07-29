@@ -361,3 +361,390 @@
 .join-form input[type='file'] {
   padding: 8px;
 }
+
+/* ── Stats Panel ────────────────────────── */
+.stats-panel {
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid #2a3a4f;
+  border-radius: 12px;
+  background: #121a24;
+}
+
+.stats-panel h2 {
+  margin: 0 0 16px;
+  font-size: 1.15rem;
+  font-weight: 650;
+  color: #e8eef7;
+}
+
+.stats-panel h3 {
+  margin: 20px 0 10px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #c5d0dc;
+  border-bottom: 1px solid #243044;
+  padding-bottom: 6px;
+}
+
+.stats-panel h4 {
+  margin: 14px 0 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #9aabbd;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stats-hint {
+  margin: 0 0 8px;
+  color: #7a8ea3;
+  font-size: 0.78rem;
+}
+
+/* Stat cards row */
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.stat-card {
+  padding: 14px 12px;
+  border-radius: 8px;
+  background: #0f1419;
+  border: 1px solid #243044;
+  border-top: 3px solid;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-card-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.stat-card-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #9aabbd;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stat-card-sub {
+  font-size: 0.72rem;
+  color: #7a8ea3;
+  margin-top: 2px;
+}
+
+/* Bar chart rows */
+.stats-bars,
+.compare-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 70px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.bar-label {
+  color: #9aabbd;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-track {
+  height: 18px;
+  border-radius: 4px;
+  background: #1a2744;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 300ms ease;
+  min-width: 3px;
+}
+
+.bar-value {
+  text-align: right;
+  color: #c5d0dc;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Detail grid */
+.stats-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 0.82rem;
+  border-bottom: 1px solid #1a2744;
+}
+
+.detail-label {
+  color: #9aabbd;
+}
+
+.detail-value {
+  color: #e8eef7;
+  font-weight: 500;
+}
+
+/* History table */
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  margin-bottom: 12px;
+}
+
+.stats-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: #7a8ea3;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid #2a3a4f;
+}
+
+.stats-table td {
+  padding: 8px;
+  border-bottom: 1px solid #1a2744;
+  color: #c5d0dc;
+}
+
+.stats-table tr {
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.stats-table tr:hover {
+  background: #1a2744;
+}
+
+.stats-table tr.selected {
+  background: #1e2f4a;
+}
+
+.stats-table .model-name {
+  font-weight: 600;
+  color: #e8eef7;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-table input[type='checkbox'] {
+  accent-color: #3d7eff;
+}
+
+.stat-good {
+  color: #4ecf73;
+  font-weight: 600;
+}
+
+.stat-warn {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.stats-section {
+  margin-top: 4px;
+}
+
+.compare-charts h4 {
+  margin-top: 16px;
+}
+
+/* ── Score Hero ───────────────────────── */
+.score-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.score-ring {
+  flex-shrink: 0;
+}
+
+.score-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.score-hero-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9aabbd;
+}
+
+.score-hero-model {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #e8eef7;
+}
+
+/* ── Live Call Card ───────────────────── */
+.live-call-card {
+  padding: 16px;
+  border-radius: 10px;
+  background: #0f1419;
+  border: 1px solid #243044;
+  border-left: 4px solid;
+  margin-bottom: 16px;
+}
+
+.live-call-card h3 {
+  margin: 0 0 6px;
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: #c5d0dc;
+  border: none;
+  padding: 0;
+}
+
+.live-call-verdict {
+  margin: 0 0 12px;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.live-call-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.mini-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #121a24;
+}
+
+.mini-stat-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #7a8ea3;
+}
+
+.mini-stat-value {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #e8eef7;
+}
+
+.mini-stat-value.stat-good {
+  color: #4ecf73;
+}
+
+.mini-stat-value.stat-warn {
+  color: #f59e0b;
+}
+
+/* ── Score Breakdown Bars ─────────────── */
+.score-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.score-bar-row {
+  display: grid;
+  grid-template-columns: 150px 1fr 36px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.score-bar-label {
+  color: #c5d0dc;
+  font-weight: 500;
+}
+
+.score-bar-weight {
+  color: #7a8ea3;
+  font-size: 0.72rem;
+}
+
+/* ── Audio Metrics Grid ───────────────── */
+.audio-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  border-radius: 8px;
+  background: #0f1419;
+  border: 1px solid #1a2744;
+  text-align: center;
+}
+
+.metric-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.metric-value {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #e8eef7;
+}
+
+.metric-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #7a8ea3;
+}
+
+/* ── Score Badge (table) ──────────────── */
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fff;
+}
