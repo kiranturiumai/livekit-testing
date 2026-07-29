@@ -39,7 +39,7 @@ function App() {
   // Off by default: same-machine / multi-tab joins often cannot open one camera twice.
   const [enableVideo, setEnableVideo] = useState(false);
   const [recommendedAudioOnJoin, setRecommendedAudioOnJoin] = useState(true);
-  const [deepFilterNetOnJoin, setDeepFilterNetOnJoin] = useState(true);
+  const [noiseSuppressionOnJoin, setNoiseSuppressionOnJoin] = useState(true);
   const [joined, setJoined] = useState(false);
   const [session, setSession] = useState(null);
   const [error, setError] = useState('');
@@ -83,7 +83,7 @@ function App() {
       audio: enableAudio,
       video: enableVideo,
       recommendedAudio: recommendedAudioOnJoin,
-      deepFilterNet: deepFilterNetOnJoin,
+      noiseSuppression: noiseSuppressionOnJoin,
       options: {
         audioCaptureDefaults: buildAudioCaptureOptions({
           recommended: recommendedAudioOnJoin,
@@ -139,7 +139,7 @@ function App() {
           onLeave={handleLeave}
           mediaWarning={mediaWarning}
           initialRecommendedAudio={session.recommendedAudio}
-          initialDeepFilterNet={session.deepFilterNet}
+          initialNoiseSuppression={session.noiseSuppression}
         />
       </LiveKitRoom>
     );
@@ -265,14 +265,14 @@ function App() {
                   />
                   Recommended WebRTC audio on join
                 </label>
-                <label className="checkbox-label" htmlFor="deepFilterNetOnJoin">
+                <label className="checkbox-label" htmlFor="noiseSuppressionOnJoin">
                   <input
-                    id="deepFilterNetOnJoin"
+                    id="noiseSuppressionOnJoin"
                     type="checkbox"
-                    checked={deepFilterNetOnJoin}
-                    onChange={(e) => setDeepFilterNetOnJoin(e.target.checked)}
+                    checked={noiseSuppressionOnJoin}
+                    onChange={(e) => setNoiseSuppressionOnJoin(e.target.checked)}
                   />
-                  DeepFilterNet3 (ORT) on published mic
+                  AI noise suppression on join (auto: DeepFilterNet / RNNoise)
                 </label>
               </div>
 

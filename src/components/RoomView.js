@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ControlBar,
   GridLayout,
@@ -13,13 +13,19 @@ import {
 import { ConnectionState, RoomEvent, Track } from 'livekit-client';
 import { buildAudioCaptureOptions } from '../audioCapture';
 import { DeepFilterNetLiveKitProcessor } from '../livekit/deepFilterNetProcessor';
+import { RnnoiseLiveKitProcessor } from '../livekit/rnnoiseProcessor';
+import {
+  LIVE_NOISE_MODELS,
+  selectNoiseModel,
+} from '../livekit/selectNoiseModel';
 import { getDeepFilterSession } from '../models/deepfilternetOrt';
+import { getRnnoiseModule } from '../models/rnnoiseWasm';
 
 export function RoomView({
   onLeave,
   mediaWarning,
   initialRecommendedAudio = true,
-  initialDeepFilterNet = true,
+  initialNoiseSuppression = true,
 }) {
   const room = useRoomContext();
   const connectionState = useConnectionState();
@@ -28,15 +34,22 @@ export function RoomView({
   const [recommendedAudio, setRecommendedAudio] = useState(
     initialRecommendedAudio,
   );
-  const [deepFilterNet, setDeepFilterNet] = useState(initialDeepFilterNet);
-  const [busy, setBusy] = useState(false);
-  const [dfnBusy, setDfnBusy] = useState(false);
-  const [toggleError, setToggleError] = useState('');
-  const [dfnStatus, setDfnStatus] = useState(
-    initialDeepFilterNet ? 'DeepFilterNet: starting…' : 'DeepFilterNet: off',
+  const [noiseSuppression, setNoiseSuppression] = useState(
+    initialNoiseSuppression,
   );
-  const [dfnStats, setDfnStats] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [nsBusy, setNsBusy] = useState(false);
+  const [toggleError, setToggleError] = useState('');
+  const [nsStatus, setNsStatus] = useState(
+    initialNoiseSuppression
+      ? 'Noise suppression: selecting model…'
+      : 'Noise suppression: off',
+  );
+  const [nsStats, setNsStats] = useState(null);
   const processorRef = useRef(null);
+  const selectedModelRef = useRef(null);
+
+  const selection = useMemo(() => selectNoiseModel(), []);
 
   const audioCaptureDefaults = buildAudioCaptureOptions({
     recommended: recommendedAudio,
@@ -55,7 +68,7 @@ export function RoomView({
     return pub?.track;
   }, [localParticipant]);
 
-  const detachDeepFilterNet = useCallback(async () => {
+  const detachNoiseProcessor = useCallback(async () => {
     const micTrack = getMicTrack();
     processorRef.current = null;
     if (micTrack && typeof micTrack.stopProcessor === 'function') {
@@ -63,67 +76,107 @@ export function RoomView({
     }
   }, [getMicTrack]);
 
-  const attachDeepFilterNet = useCallback(async () => {
-    const micTrack = getMicTrack();
-    if (!micTrack) {
-      setDfnStatus('DeepFilterNet: waiting for microphone…');
-      return;
+  const attachWithModel = useCallback(
+    async (modelId) => {
+      const micTrack = getMicTrack();
+      if (!micTrack) {
+        setNsStatus('Noise suppression: waiting for microphone…');
+        return null;
+      }
+
+      if (modelId === LIVE_NOISE_MODELS.DEEPFILTERNET) {
+        setNsStatus('DeepFilterNet3: loading model…');
+        await getDeepFilterSession();
+        const processor = new DeepFilterNetLiveKitProcessor({
+          enabled: true,
+          attenLimDb: 0,
+        });
+        processorRef.current = processor;
+        await micTrack.setProcessor(processor);
+        selectedModelRef.current = LIVE_NOISE_MODELS.DEEPFILTERNET;
+        setNsStatus(`DeepFilterNet3: on — ${selection.reason}`);
+        return LIVE_NOISE_MODELS.DEEPFILTERNET;
+      }
+
+      setNsStatus('RNNoise: loading WASM…');
+      await getRnnoiseModule();
+      const processor = new RnnoiseLiveKitProcessor({ enabled: true });
+      processorRef.current = processor;
+      await micTrack.setProcessor(processor);
+      selectedModelRef.current = LIVE_NOISE_MODELS.RNNOISE;
+      setNsStatus(`RNNoise: on — ${selection.reason}`);
+      return LIVE_NOISE_MODELS.RNNOISE;
+    },
+    [getMicTrack, selection.reason],
+  );
+
+  const attachNoiseProcessor = useCallback(async () => {
+    const preferred = selection.modelId;
+
+    try {
+      return await attachWithModel(preferred);
+    } catch (err) {
+      // If DeepFilterNet fails on a "capable" device, fall back to RNNoise.
+      if (preferred === LIVE_NOISE_MODELS.DEEPFILTERNET) {
+        console.warn(
+          '[RoomView] DeepFilterNet failed, falling back to RNNoise:',
+          err,
+        );
+        setNsStatus('DeepFilterNet failed — falling back to RNNoise…');
+        try {
+          await detachNoiseProcessor();
+        } catch {
+          /* ignore */
+        }
+        return await attachWithModel(LIVE_NOISE_MODELS.RNNOISE);
+      }
+      throw err;
     }
+  }, [attachWithModel, detachNoiseProcessor, selection.modelId]);
 
-    setDfnStatus('DeepFilterNet: loading model…');
-    await getDeepFilterSession();
-
-    const processor = new DeepFilterNetLiveKitProcessor({
-      enabled: true,
-      attenLimDb: 0,
-    });
-    processorRef.current = processor;
-    await micTrack.setProcessor(processor);
-    setDfnStatus('DeepFilterNet: on (ORT)');
-  }, [getMicTrack]);
-
-  const syncDeepFilterNet = useCallback(
+  const syncNoiseSuppression = useCallback(
     async (enabled) => {
-      setDfnBusy(true);
+      setNsBusy(true);
       setToggleError('');
       try {
         if (enabled) {
-          await attachDeepFilterNet();
+          await attachNoiseProcessor();
         } else {
-          await detachDeepFilterNet();
-          setDfnStatus('DeepFilterNet: off');
-          setDfnStats(null);
+          await detachNoiseProcessor();
+          selectedModelRef.current = null;
+          setNsStatus('Noise suppression: off');
+          setNsStats(null);
         }
-        setDeepFilterNet(enabled);
+        setNoiseSuppression(enabled);
       } catch (err) {
-        console.error('[RoomView] DeepFilterNet toggle failed:', err);
+        console.error('[RoomView] noise suppression toggle failed:', err);
         setToggleError(
-          err?.message || 'Failed to toggle DeepFilterNet processor.',
+          err?.message || 'Failed to toggle noise suppression processor.',
         );
-        setDfnStatus('DeepFilterNet: error');
+        setNsStatus('Noise suppression: error');
       } finally {
-        setDfnBusy(false);
+        setNsBusy(false);
       }
     },
-    [attachDeepFilterNet, detachDeepFilterNet],
+    [attachNoiseProcessor, detachNoiseProcessor],
   );
 
   // Attach once connected / when mic becomes available.
   useEffect(() => {
     if (connectionState !== ConnectionState.Connected) return undefined;
-    if (!deepFilterNet) return undefined;
+    if (!noiseSuppression) return undefined;
 
     let cancelled = false;
     const tryAttach = async () => {
       if (cancelled) return;
       if (processorRef.current) return;
       try {
-        await attachDeepFilterNet();
+        await attachNoiseProcessor();
       } catch (err) {
         if (!cancelled) {
-          console.error('[RoomView] DeepFilterNet attach failed:', err);
-          setToggleError(err?.message || 'Failed to attach DeepFilterNet.');
-          setDfnStatus('DeepFilterNet: error');
+          console.error('[RoomView] noise processor attach failed:', err);
+          setToggleError(err?.message || 'Failed to attach noise processor.');
+          setNsStatus('Noise suppression: error');
         }
       }
     };
@@ -138,24 +191,24 @@ export function RoomView({
       cancelled = true;
       room.off(RoomEvent.LocalTrackPublished, onLocalTrackPublished);
     };
-  }, [attachDeepFilterNet, connectionState, deepFilterNet, room]);
+  }, [attachNoiseProcessor, connectionState, noiseSuppression, room]);
 
   // Cleanup processor on leave/unmount.
   useEffect(() => {
     return () => {
-      void detachDeepFilterNet();
+      void detachNoiseProcessor();
     };
-  }, [detachDeepFilterNet]);
+  }, [detachNoiseProcessor]);
 
   // Poll lightweight inference stats while enabled.
   useEffect(() => {
-    if (!deepFilterNet) return undefined;
+    if (!noiseSuppression) return undefined;
     const id = window.setInterval(() => {
       const stats = processorRef.current?.getStats?.();
-      if (stats) setDfnStats(stats);
+      if (stats) setNsStats(stats);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [deepFilterNet]);
+  }, [noiseSuppression]);
 
   const applyCaptureSettings = useCallback(
     async (recommended) => {
@@ -166,10 +219,10 @@ export function RoomView({
       };
 
       const micTrack = getMicTrack();
-      const wasDfn = deepFilterNet;
+      const wasNs = noiseSuppression;
 
-      if (wasDfn) {
-        await detachDeepFilterNet();
+      if (wasNs) {
+        await detachNoiseProcessor();
       }
 
       if (micTrack && typeof micTrack.restartTrack === 'function') {
@@ -178,16 +231,16 @@ export function RoomView({
         await localParticipant.setMicrophoneEnabled(true, nextOptions);
       }
 
-      if (wasDfn) {
-        await attachDeepFilterNet();
+      if (wasNs) {
+        await attachNoiseProcessor();
       }
     },
     [
-      attachDeepFilterNet,
-      deepFilterNet,
-      detachDeepFilterNet,
+      attachNoiseProcessor,
+      detachNoiseProcessor,
       getMicTrack,
       localParticipant,
+      noiseSuppression,
       room,
     ],
   );
@@ -209,9 +262,16 @@ export function RoomView({
     }
   };
 
-  const handleToggleDeepFilterNet = async (event) => {
-    await syncDeepFilterNet(event.target.checked);
+  const handleToggleNoiseSuppression = async (event) => {
+    await syncNoiseSuppression(event.target.checked);
   };
+
+  const activeModelLabel =
+    selectedModelRef.current === LIVE_NOISE_MODELS.DEEPFILTERNET
+      ? 'DeepFilterNet3'
+      : selectedModelRef.current === LIVE_NOISE_MODELS.RNNOISE
+        ? 'RNNoise'
+        : selection.modelLabel;
 
   return (
     <div className="room">
@@ -226,7 +286,10 @@ export function RoomView({
             WebRTC:{' '}
             <strong>{recommendedAudio ? 'recommended' : 'raw'}</strong>
             {' · '}
-            DFN: <strong>{deepFilterNet ? 'on' : 'off'}</strong>
+            NS:{' '}
+            <strong>
+              {noiseSuppression ? activeModelLabel : 'off'}
+            </strong>
           </p>
         </div>
         <button type="button" className="leave-btn" onClick={onLeave}>
@@ -251,26 +314,52 @@ export function RoomView({
       </div>
 
       <div className="settings-toggle-bar">
-        <label className="checkbox-label" htmlFor="deepFilterNetLive">
+        <label className="checkbox-label" htmlFor="noiseSuppressionLive">
           <input
-            id="deepFilterNetLive"
+            id="noiseSuppressionLive"
             type="checkbox"
-            checked={deepFilterNet}
-            disabled={dfnBusy || connectionState !== ConnectionState.Connected}
-            onChange={handleToggleDeepFilterNet}
+            checked={noiseSuppression}
+            disabled={nsBusy || connectionState !== ConnectionState.Connected}
+            onChange={handleToggleNoiseSuppression}
           />
-          DeepFilterNet3 (ONNX Runtime Web) on published mic
+          AI noise suppression (auto: DeepFilterNet / RNNoise)
         </label>
-        <span className="settings-hint">{dfnStatus}</span>
-        {dfnStats ? (
+        <span className="settings-hint">{nsStatus}</span>
+        {nsStats ? (
           <span className="settings-hint">
-            frame {dfnStats.lastFrameMs.toFixed(1)} ms · underruns{' '}
-            {dfnStats.underruns}
+            frame {nsStats.lastFrameMs.toFixed(1)} ms · underruns{' '}
+            {nsStats.underruns}
           </span>
         ) : null}
       </div>
 
-      {busy || dfnBusy ? (
+      <div className="capture-summary" style={{ margin: '0 20px 12px' }}>
+        <p className="capture-summary-title">Selected model for this device</p>
+        <ul>
+          <li>
+            Preferred: <code>{selection.modelLabel}</code>
+          </li>
+          <li>
+            Reason: <code>{selection.reason}</code>
+          </li>
+          <li>
+            Cores: <code>{selection.assessment.cores}</code>
+            {' · '}
+            Memory:{' '}
+            <code>
+              {selection.assessment.memoryGB != null
+                ? `${selection.assessment.memoryGB} GB`
+                : 'unknown'}
+            </code>
+            {' · '}
+            Mobile: <code>{String(selection.assessment.isMobile)}</code>
+            {' · '}
+            Score: <code>{selection.assessment.score}</code>
+          </li>
+        </ul>
+      </div>
+
+      {busy || nsBusy ? (
         <p className="connecting">Updating audio pipeline…</p>
       ) : null}
       {toggleError ? <p className="media-warning">{toggleError}</p> : null}
@@ -287,7 +376,7 @@ export function RoomView({
       </details>
 
       <div className="room-stage" data-lk-theme="default">
-        <GridLayout tracks={tracks} style={{ height: 'calc(100vh - 300px)' }}>
+        <GridLayout tracks={tracks} style={{ height: 'calc(100vh - 340px)' }}>
           <ParticipantTile />
         </GridLayout>
         <RoomAudioRenderer />

@@ -2,13 +2,14 @@ import { MODEL_SAMPLE_RATE } from './types';
 import { resampleLinear } from '../audio/resample';
 
 export const RNNOISE_WASM_ID = 'rnnoise-wasm';
+export const RNNOISE_FRAME_SIZE = 480;
 
-const FRAME_SIZE = 480;
+const FRAME_SIZE = RNNOISE_FRAME_SIZE;
 const SHIFT_16_BIT = 32768;
 
 let wasmModulePromise = null;
 
-async function getRnnoiseModule() {
+export async function getRnnoiseModule() {
   if (!wasmModulePromise) {
     wasmModulePromise = (async () => {
       const { default: createModule } = await import(
@@ -24,7 +25,7 @@ async function getRnnoiseModule() {
   return wasmModulePromise;
 }
 
-class RnnoiseProcessor {
+export class RnnoiseFrameProcessor {
   constructor(wasmModule) {
     this._module = wasmModule;
     this._context = wasmModule._rnnoise_create();
@@ -75,7 +76,7 @@ export const rnnoiseWasmModel = {
   async process(input, inputSampleRate = MODEL_SAMPLE_RATE, options = {}) {
     const { onProgress } = options;
     const wasmModule = await getRnnoiseModule();
-    const processor = new RnnoiseProcessor(wasmModule);
+    const processor = new RnnoiseFrameProcessor(wasmModule);
 
     let mono;
     let sr = inputSampleRate;
