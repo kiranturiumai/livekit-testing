@@ -3,8 +3,6 @@ import { LiveKitRoom } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { AudioPresets } from 'livekit-client';
 import {
-  RAW_AUDIO_CAPTURE,
-  VOICE_AUDIO_CAPTURE,
   buildAudioCaptureOptions,
 } from './audioCapture';
 import { createJoinToken } from './createToken';
